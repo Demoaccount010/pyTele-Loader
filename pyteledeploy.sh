@@ -45,8 +45,8 @@ else
   echo "WARNING: requirements.txt not found at target repo root ($WORKDIR)."
 fi
 
-echo "Verifying python-dotenv import..."
-$PY - <<'PYCODE'
+echo "Verifying python-dotenv import (clean heredoc) ..."
+$PY - <<'PY_CHECK'
 import importlib, sys
 try:
     importlib.import_module('dotenv')
@@ -55,11 +55,14 @@ try:
 except Exception as e:
     print("dotenv import FAILED:", e)
     sys.exit(2)
-PYCODE || {
+PY_CHECK
+
+# check exit status of that python check
+if [ $? -ne 0 ]; then
   echo "python-dotenv not importable; forcing install python-dotenv..."
   $PY -m pip install python-dotenv || true
-  echo "After forced install, verify:"
-  $PY - <<'PYCODE'
+  echo "After forced install, verify import again:"
+  $PY - <<'PY_CHECK2'
 import importlib, sys
 try:
     importlib.import_module('dotenv')
@@ -67,8 +70,8 @@ try:
 except Exception as e:
     print("Still failing to import dotenv:", e)
     sys.exit(3)
-PYCODE
-}
+PY_CHECK2
+fi
 
 echo "=== Installed packages (top) ==="
 $PY -m pip freeze | sed -n '1,120p' || true
@@ -79,5 +82,6 @@ if [ -z "${START_CMD:-}" ]; then
 fi
 
 echo "Running START_CMD: $START_CMD"
+# run from target repo root
 bash -lc "$START_CMD"
 echo "=== pyteledeploy.sh END ==="
