@@ -1,34 +1,83 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
 
-if [ -z "$REPO_URL" ] || [ -z "$REPO_BRANCH" ]; then
-  echo "REPO_URL or REPO_BRANCH environment variable is not set. Exiting ..."
+echo "=== pyteledeploy.sh START ==="
+echo "Date: $(date)"
+echo "REPO_URL=${REPO_URL:-<not set>}"
+echo "REPO_BRANCH=${REPO_BRANCH:-main}"
+echo "START_CMD=${START_CMD:-<not set>}"
+
+PY=python3
+if ! command -v $PY >/dev/null 2>&1; then
+  PY=python
+fi
+echo "Using python: $($PY --version 2>&1 || true)"
+
+WORKDIR="$(pwd)/target_repo"
+rm -rf "$WORKDIR"
+mkdir -p "$WORKDIR"
+
+if [ -z "${REPO_URL:-}" ]; then
+  echo "ERROR: REPO_URL not set in env. Exiting."
   exit 1
 fi
 
-if [ -d ".git" ]; then
-  rm -rf .git
+echo "Cloning target repo..."
+git clone --depth 1 --branch "${REPO_BRANCH:-main}" "$REPO_URL" "$WORKDIR"
+
+echo "Contents of target repo:"
+ls -la "$WORKDIR"
+
+cd "$WORKDIR"
+
+if [ -f requirements.txt ]; then
+  echo "---- requirements.txt ----"
+  sed -n '1,200p' requirements.txt || true
+  echo "---- end requirements ----"
+  echo "Installing requirements..."
+  $PY -m pip install --upgrade pip setuptools wheel || true
+  $PY -m pip install -r requirements.txt || {
+    echo "pip install failed; retrying with --no-cache-dir -v..."
+    $PY -m pip install -r requirements.txt --no-cache-dir -v || true
+  }
+else
+  echo "WARNING: requirements.txt not found at target repo root ($WORKDIR)."
 fi
 
-git init -q
-git config --global user.email drxxstrange@gmail.com
-git config --global user.name SilentDemonSD
-git remote add origin $REPO_URL
-git fetch origin -q
-git reset --hard origin/$REPO_BRANCH -q
+echo "Verifying python-dotenv import..."
+$PY - <<'PYCODE'
+import importlib, sys
+try:
+    importlib.import_module('dotenv')
+    print("dotenv import OK")
+    sys.exit(0)
+except Exception as e:
+    print("dotenv import FAILED:", e)
+    sys.exit(2)
+PYCODE || {
+  echo "python-dotenv not importable; forcing install python-dotenv..."
+  $PY -m pip install python-dotenv || true
+  echo "After forced install, verify:"
+  $PY - <<'PYCODE'
+import importlib, sys
+try:
+    importlib.import_module('dotenv')
+    print("dotenv import OK after forced install")
+except Exception as e:
+    print("Still failing to import dotenv:", e)
+    sys.exit(3)
+PYCODE
+}
 
-uv pip install --system --no-cache-dir -q -r requirements.txt
+echo "=== Installed packages (top) ==="
+$PY -m pip freeze | sed -n '1,120p' || true
 
-if [ -z "$START_CMD" ]; then
-  echo "START_CMD not specified. Exiting Now ..."
+if [ -z "${START_CMD:-}" ]; then
+  echo "ERROR: START_CMD not set. Exiting."
   exit 1
 fi
 
-echo "
-░▀█▀▒██▀░█▒░▒██▀░▒░░█▒░░▄▀▄▒▄▀▄░█▀▄▒██▀▒█▀▄
-░▒█▒░█▄▄▒█▄▄░█▄▄░▀▀▒█▄▄░▀▄▀░█▀█▒█▄▀░█▄▄░█▀▄
-                                     v2.0.0
-Repo : https://github.com/SilentDemonSD/pyTele-Loader By SilentDemonSD
-Repo URL : $REPO_URL
-Repo Branch : $REPO_BRANCH"
-
-eval "$START_CMD"
+echo "Running START_CMD: $START_CMD"
+bash -lc "$START_CMD"
+echo "=== pyteledeploy.sh END ==="
